@@ -1,101 +1,68 @@
 import sqlite3
-import hashlib
-from typing import List, Dict
+from typing import Dict, List
 
 class User:
-    def __init__(self, db_path: str = "wallet.db"):
-        """Initialize with path to SQLite database."""
+    """
+    Maps to the USER table in 622_final.db, which has columns:
+      - user_id (TEXT PRIMARY KEY)
+      - username (TEXT)
+      - pw       (TEXT)
+    """
+    def __init__(self, db_path: str = "622_final.db"):
         self.db_path = db_path
 
-    def _hash_password(self, password: str) -> str:
-        """Return a SHA‑256 hash of the given password."""
-        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    def create(self, user_id: str, username: str, pw: str):
+        """INSERT a new user record."""
+        sql = "INSERT INTO USER (user_id, username, pw) VALUES (?, ?, ?)"
+        self._run(sql, (user_id, username, pw))
 
-    def create(self, name: str, email: str, username: str, password: str):
-        """
-        Add a new user with credentials.
-        Stores the SHA‑256 hash of the password.
-        """
-        pwd_hash = self._hash_password(password)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "INSERT INTO users (name, email, username, password_hash) VALUES (?, ?, ?, ?)",
-                (name, email, username, pwd_hash)
-            )
-            conn.commit()
-
-    def get_by_id(self, user_id: int) -> Dict:
-        """Fetch a single user (excluding password) by user_id."""
-        with sqlite3.connect(self.db_path) as conn:
-            cur = conn.execute(
-                "SELECT user_id, name, email, username FROM users WHERE user_id = ?",
-                (user_id,)
-            )
-            row = cur.fetchone()
-        return {"user_id": row[0], "name": row[1], "email": row[2], "username": row[3]} if row else {}
+    def get_by_id(self, user_id: str) -> Dict:
+        """SELECT one user by user_id."""
+        sql = "SELECT user_id, username, pw FROM USER WHERE user_id = ?"
+        return self._fetchone(sql, (user_id,))
 
     def get_by_username(self, username: str) -> Dict:
-        """Fetch full user record (including password_hash) by username."""
-        with sqlite3.connect(self.db_path) as conn:
-            cur = conn.execute(
-                "SELECT user_id, name, email, username, password_hash FROM users WHERE username = ?",
-                (username,)
-            )
-            row = cur.fetchone()
-        if not row:
-            return {}
-        return {
-            "user_id":      row[0],
-            "name":         row[1],
-            "email":        row[2],
-            "username":     row[3],
-            "password_hash":row[4]
-        }
+        """SELECT one user by username."""
+        sql = "SELECT user_id, username, pw FROM USER WHERE username = ?"
+        return self._fetchone(sql, (username,))
 
-    def authenticate(self, username: str, password: str) -> bool:
-        """
-        Verify that the provided password matches the stored hash.
-        Returns True if credentials are valid.
-        """
-        user = self.get_by_username(username)
-        if not user:
-            return False
-        return user["password_hash"] == self._hash_password(password)
+    def update_password(self, user_id: str, new_pw: str):
+        """UPDATE the pw field for a given user_id."""
+        sql = "UPDATE USER SET pw = ? WHERE user_id = ?"
+        self._run(sql, (new_pw, user_id))
 
-    def update_email(self, user_id: int, new_email: str):
-        """Update the email address for an existing user."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "UPDATE users SET email = ? WHERE user_id = ?",
-                (new_email, user_id)
-            )
-            conn.commit()
-
-    def update_password(self, user_id: int, new_password: str):
-        """Update password for an existing user (stores new hash)."""
-        new_hash = self._hash_password(new_password)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "UPDATE users SET password_hash = ? WHERE user_id = ?",
-                (new_hash, user_id)
-            )
-            conn.commit()
-
-    def delete(self, user_id: int):
-        """Remove a user from the database."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "DELETE FROM users WHERE user_id = ?",
-                (user_id,)
-            )
-            conn.commit()
+    def delete(self, user_id: str):
+        """DELETE a user by user_id."""
+        sql = "DELETE FROM USER WHERE user_id = ?"
+        self._run(sql, (user_id,))
 
     def list_all(self) -> List[Dict]:
-        """Return a list of all users (excluding password hashes)."""
+        """RETURN all users as a list of dicts."""
+        sql = "SELECT user_id, username, pw FROM USER"
+        return self._fetchall(sql)
+
+    # ─── Private helpers ───────────────────────────────────────────────────
+
+    def _run(self, sql: str, params: tuple = ()):
+        """Execute INSERT/UPDATE/DELETE and commit."""
         with sqlite3.connect(self.db_path) as conn:
-            cur = conn.execute("SELECT user_id, name, email, username FROM users")
+            conn.execute(sql, params)
+            conn.commit()
+
+    def _fetchone(self, sql: str, params: tuple = ()) -> Dict:
+        """Execute SELECT and return a single row as dict (or empty)."""
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute(sql, params)
+            row = cur.fetchone()
+            if not row:
+                return {}
+            cols = [col[0] for col in cur.description]
+            return dict(zip(cols, row))
+
+    def _fetchall(self, sql: str, params: tuple = ()) -> List[Dict]:
+        """Execute SELECT and return all rows as list of dicts."""
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute(sql, params)
             rows = cur.fetchall()
-        return [
-            {"user_id": r[0], "name": r[1], "email": r[2], "username": r[3]}
-            for r in rows
-        ]
+            cols = [col[0] for col in cur.description]
+            return [dict(zip(cols, r)) for r in rows]
